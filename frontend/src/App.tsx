@@ -1,8 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 function App() {
   const [backendStatus, setBackendStatus] = useState("Checking...");
   const [connected, setConnected] = useState(false);
+  const [messages, setMessages] = useState<{role:string;content:string;evidence:any[];disclosure:string}[]>([]);
+  const [input, setInput] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [conversationId] = useState(() => "ghost-" + Math.random().toString(36).slice(2));
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function check() {
@@ -26,8 +31,35 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || generating) return;
+    const userMsg = input.trim();
+    setMessages(prev => [...prev, { role: 'user', content: userMsg, evidence: [], disclosure: '' }]);
+    setInput("");
+    setGenerating(true);
+    try {
+      const res = await fetch("http://127.0.0.1:8002/ghost/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMsg, conversation_id: conversationId }),
+      });
+      const data = await res.json();
+      setMessages(prev => [...prev, { role: 'assistant', content: data.answer || "No response received.", evidence: data.references || [], disclosure: data.synthetic_disclosure || "" }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: "Connection failed — check backend on port 8002.", evidence: [], disclosure: "" }]);
+    } finally {
+      setGenerating(false);
+    }
+  }, [input, generating, conversationId]);
+
+  const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  };
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
   return (
-    <main className="min-h-screen bg-gradient-to-br from-[#0f172a] via-[#0b1220] to-[#020617] text-slate-200">
+    <main className="min-h-screen bg-gradient-to-br from-[#0f172a] via-[#0b1220] to-[#020617] text-[#f3f0e8]">
       {/* Hero */}
       <section className="relative flex flex-col items-center justify-center px-6 pt-24 pb-16 text-center overflow-hidden">
         <div className="absolute top-12 left-1/2 -translate-x-1/2 w-[120%] h-[120%] pointer-events-none opacity-40">
@@ -97,17 +129,65 @@ function App() {
           </div>
         </div>
 
-        <div className="mt-6 panel-glass rounded-2xl p-7 shadow-xl shadow-black/20">
-          <h3 className="text-lg font-bold text-slate-200 mb-2">Future Time Capsule</h3>
-          <p className="text-sm text-[#b0a898] mb-4">Create a message for a future version of yourself. Stored locally. Synthetic fixtures only — no real personal data committed.</p>
-          <button
-            disabled={true}
-            className="inline-flex items-center gap-2 rounded-full px-6 py-3 bg-[#1a1520]/70 text-[#b8b4a8] border border-[#2a2535] cursor-not-allowed opacity-60 text-sm"
-            aria-label="Future capsule feature — coming in next stage"
-          >
-            <span>Create Capsule</span>
-            <span aria-hidden="true">(Available in Stage 2)</span>
-          </button>
+        <div className="mt-4 panel-glass rounded-2xl p-5 shadow-xl shadow-black/30">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full bg-amber-300 animate-pulse" />
+            <h4 className="text-sm font-bold text-[#f5d89a]">Ghost Chamber — Live Conversation</h4>
+            <span className="text-[10px] text-[#8895a0] ml-auto">Synthetic simulation · Evidence-grounded</span>
+          </div>
+          <div className="bg-[#020617]/60 rounded-xl p-4 h-72 overflow-y-auto space-y-3 border border-white/5">
+            {messages.length === 0 && (
+              <p className="text-xs text-[#8895a0]">Start a conversation with your 2016 self. No fabricated answers — every response uses real inference through Gemma 3:4b.</p>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} gap-3`}>
+                <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md ${m.role === 'user' ? 'bg-[#2a2535]/80 text-[#f3f0e8] border border-white/10' : 'bg-slate-900/60 text-[#e0ddd6] border border-amber-200/20'}`}>
+                  <div>{m.content}</div>
+                  {m.role === 'assistant' && m.evidence && m.evidence.length > 0 && (
+                    <div className="mt-2 text-[10px] text-[#b8b4a8] leading-snug">
+                      Evidence: {m.evidence.map(e => e.source).join(", ")}
+                      {m.evidence.map((e, idx) => (
+                        <span key={idx} className="block mt-1 text-[#8895a0]">{`- ${e.source}: ${e.status}`}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {generating && (
+              <div className="flex justify-start gap-3">
+                <div className="max-w-[80%] rounded-2xl px-4 py-3 text-sm bg-slate-900/60 text-[#c5c0b5] border border-amber-200/10 shadow-md animate-pulse">
+                  Generating response via Gemma 3:4b...
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              placeholder="Ask your 2016 self... (e.g., What did I believe about the future?)"
+              className="flex-1 rounded-full px-4 py-2 bg-[#020617]/80 text-sm text-[#f3f0e8] border border-white/10 placeholder-[#8895a0] focus:outline-none focus:ring-1 focus:ring-amber-300/40 transition shadow-inner"
+              disabled={generating}
+              aria-label="Message input for Ghost Chamber"
+            />
+            <button
+              onClick={handleSend}
+              disabled={generating || !input.trim()}
+              className="rounded-full px-5 py-2 bg-[#f5d89a]/90 text-[#0f172a] text-sm font-bold hover:bg-[#f5d89a] disabled:opacity-40 disabled:cursor-not-allowed transition shadow-lg shadow-amber-200/10"
+              aria-label="Send message"
+            >
+              Send
+            </button>
+          </div>
+          <div className="mt-2 flex items-center gap-2 text-[10px] text-[#8895a0]">
+            <span>Real inference · {conversationId}</span>
+            <span>·</span>
+            <span className="text-amber-300">{generating ? "Generating..." : "Ready"}</span>
+          </div>
         </div>
       </section>
 

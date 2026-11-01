@@ -1,0 +1,21 @@
+name: Stage 1 Checks
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check Python 3.12
+      run: python3 --version
+    - name: Install backend
+      run: |
+        python3 -m venv backend/venv
+        backend/venv/bin/pip install -r backend/requirements.txt pytest
+    - name: Backend test
+      run: backend/venv/bin/pytest backend/tests/test_basic.py -v
+    - name: Check frontend build
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+    - run: npm ci --prefix frontend
+    - run: npm run build --prefix frontend
